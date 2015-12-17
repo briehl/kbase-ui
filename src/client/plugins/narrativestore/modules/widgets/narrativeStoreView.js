@@ -40,6 +40,10 @@ define([
                 this.getNarMethodStoreInfo();
                 this.imageUrl = this.runtime.getConfig('services.narrative_method_store.image_url');
                 
+                if (this.options.namespace) {
+                    this.options.id = this.options.namespace + '/' + this.options.id;
+                }
+
                 console.log('Narrative Store');
                 console.log(options);
 
