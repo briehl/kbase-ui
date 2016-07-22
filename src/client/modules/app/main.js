@@ -1,8 +1,9 @@
 /*global define*/
 /*jslint white: true*/
 define([
-     'bluebird',
+    'bluebird',
     'app/App',
+    // 'app/analytics',
     'kb/common/dom',
     'yaml!config/plugin.yml',
     'yaml!config/settings.yml',
@@ -17,7 +18,8 @@ define([
     'use strict';
     Promise.config({
         warnings: true,
-        longStackTraces: true
+        longStackTraces: true,
+        cancellation: true
     });
     function setErrorField(name, ex) {
         var selector = '[data-field="' + name + '"] > span[data-name="value"]';
@@ -27,7 +29,8 @@ define([
         return;
         // dom.setHtml(dom.qs('#status'), 'started');
     }
-    displayStatus('running');
+    //Analytics.create();
+    //Analytics.send();
 
     return {
         start: function () {
@@ -47,6 +50,19 @@ define([
                 },
                 plugins: pluginConfig.plugins,
                 menus: clientConfig.menus
+            })
+            .then(function (runtime) {
+                switch (serviceConfig.deploy.environment) {
+                    case 'prod':
+                        // do nothing
+                        break;
+                    default:
+                        runtime.send('ui', 'alert', {
+                            type: 'info',
+                            message: 'You are operating in the ' + serviceConfig.deploy.name + ' environment',
+                            icon: serviceConfig.deploy.icon
+                        });
+                }
             });
         }
     };

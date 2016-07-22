@@ -21,17 +21,25 @@ DISTLIB			= $(TOPDIR)/build
 DOCSLIB			= $(TOPDIR)/docs
 DEPLOY_CFG		= deploy-$(TARGET).cfg
 KB_TOP			= /kb
+GRUNT		        = ./node_modules/.bin/grunt
+KARMA			= ./node_modules/.bin/karma
+config			= dev
+directory		= build
 
 # Standard 'all' target = just do the standard build
-all: init build
+all:
+	@echo Use "make init && make config=TARGET build"
+	@echo see docs/quick-deploy.md 
 
 # See above for 'all' - just running 'make' should locally build
-default: init build
+default:
+	@echo Use "make init && make config=TARGET build"
+	@echo see docs/quick-deploy.md 
 
 # The "EZ Install" version - init, build, start, preview
 # Note that this uses the default targets -- which are least disruptive (to production)
 # and most experimental (development ui, ci services)
-run: init build start preview
+run: init build start pause preview
 	
 
 # Initialization here pulls in all dependencies from Bower and NPM.
@@ -39,20 +47,21 @@ run: init build start preview
 # bower install is not part of the build process, since the bower
 # config is not known until the parts are assembled...
 init:
+	@echo "> Initialiing the repo for work."
 	npm install
 	cd tools/server; npm install
-	grunt init
+	$(GRUNT) init
 	
-# Perform the build.
-# The actual build step is done by grunt. This also sets up the 
-# configuration in the build target. That configuration mainly
-# deals with filling out templated URL targets based on deployment
-# location (prod vs. next vs. CI vs. local)
-#@ grunt build-dist --target $(TARGET)
-#  --deploy-config $(TARGET)
-# @ node tools/process_config.js $(DEPLOY_CFG)
+# Perform the build. Build scnearios are supported through the config option
+# which is passed in like "make build config=ci"
 build:	
-	cd mutations; node build build
+	@echo "> Building."
+	cd mutations; node build $(config)
+
+# The deploy step will copy the files according to the instructions in the deploy
+# config. See mutations/deploy.js for details.
+#deploy:	
+#	cd mutations; node build deploy; node deploy
 	
 # Set up a development environment. 
 # Installs tools into kbase-ui/dev. These tools are ignored by git,
@@ -63,38 +72,41 @@ devinit:
 	
 
 start:
-	cd tools/server; node server start  $(target) &
+	@echo "> Starting preview server."
+	@echo "> (make stop to kill it)"
+	cd tools/server; node server start $(config) $(directory)&
+	
+pause:
+	@echo "> Pausing to let the server start up."
+	sleep 5
 
 stop: 
-	cd tools/server; node server stop 
+	@echo "> Stopping the preview server."
+	cd tools/server; node server stop  $(config)
 
 # Run the server, and open a browser pointing to it.
 preview:
-	cd tools/server; node server preview
+	@echo "> Launching default browser for preview"
+	cd tools/server; node server preview $(config)
 	
-dist: 
-	cd mutations; node build deploy
-
-# The deploy step will copy the files according to the instructions in the deploy
-# config. See mutations/deploy.js for details.
-deploy:	
-	cd mutations; node build deploy; node deploy
 
 # Tests are managed by grunt, but this also mimics the workflow.
 #init build
 test:
-	karma start test/karma.conf.js
+	$(KARMA) start test/karma.conf.js
 	
+test-travis:
+	$(GRUNT) test-travis	
 
-# Cleans up build artifacts without removing required libraries
-# that get installed through Bower or NPM.
+# Clean slate
 clean:
-	@ grunt clean-dist
+	$(GRUNT) clean-all
+	
+clean-temp:
+	$(GRUNT) clean:temp
 
-# Cleans out all required libraries and packages.
-reqs-clean: clean
-	@ rm -rf node_modules/
-	@ rm -rf bower_components/
+# If you need more clean refinement, please see Gruntfile.js, in which you will
+# find clean tasks for each major build artifact.
 
 # Eventually, if docs need to be built, the process will go here.
 docs: init

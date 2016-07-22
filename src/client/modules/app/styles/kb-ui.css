@@ -114,6 +114,10 @@ body {
     height:100%;
 }
 
+body {
+    overflow-y: scroll;
+}
+
 a:hover, .pointer {
     cursor: hand;
     cursor: pointer;
@@ -808,3 +812,7 @@ div::-webkit-scrollbar-thumb {
     margin: 10px 0 0 50px;
 }
 
+/* provide underlines in prettyprinted links */
+.prettyprinted a {
+    text-decoration: underline;
+}

@@ -59,3 +59,49 @@ services:
     catalog:
         url: <%= catalog_url %>
         name: Catalog
+    taxon_api:
+        url: <%= taxon_api_url %>
+        name: Taxon API
+    assembly_api:
+        url: <%= assembly_api_url %>
+        name: Assembly API 
+    genomeAnnotation_api:
+        url: <%= genome_annotation_api_url %>
+        name: Genome Annotation API
+    doc_site:
+        url: <%= doc_site_url %>
+        name: Documentation and Support Site
+        
+resources:
+    docSite:
+        base:
+            url: <%= doc_site_url %>
+    documentation:
+        loginHelp:
+            url: <%= doc_login_help %>
+        narrativeGuide:
+            url: <%= doc_narrative_guide %>
+        tutorials:
+            url: <%= doc_tutorials %>
+        apps:
+            url: <%= doc_apps %>
+    userAccount:
+        resetPassword: 
+            url: <%= reset_password_url %>
+        updateProfile: 
+            url: <%= update_profile_url %> 
+        update_profile: 
+            url: <%= update_profile_url %> 
+        access:
+            url: <%= user_account_url %>
+        signUp:
+            url: <%= signup_url %>
+    status_page: <%= status_page_url %>
+    submit_jira_ticket: <%= submit_jira_ticket_url %>
+    googleAnalytics:
+        code: <%= google_analytics_code %>
+deploy:
+    environment: <%= deploy_environment %>
+    hostname: <%= deploy_hostname %>
+    icon: <%= deploy_icon %>
+    name: <%= deploy_name %>

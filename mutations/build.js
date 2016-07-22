@@ -33,8 +33,8 @@ var Promise = require('bluebird'),
     glob = Promise.promisify(require('glob').Glob),
     ini = require('ini'),
     underscore = require('underscore'),
-    dir = Promise.promisifyAll(require('node-dir'));
-
+    dir = Promise.promisifyAll(require('node-dir')),
+    util = require('util');
 
 // UTILS
 
@@ -499,9 +499,13 @@ function installExternalPlugins(state) {
                         cwd = cwds.split('/'),
                         // Our actual cwd is mutations, so we need to escape one up to the 
                         // project root.
-                        repoRoot = (plugin.source.directory.root && plugin.source.directory.root.split('/')) || ['..', '..', '..'],
+                        repoRoot = (plugin.source.directory.root && plugin.source.directory.root.split('/')) || ['..', '..'],
                         source = repoRoot.concat([plugin.globalName]).concat(cwd),
                         destination = root.concat(['build', 'client', 'modules', 'plugins', plugin.name]);
+//                    console.log('EXTERNAL plugin');
+//                    console.log(source);
+//                    console.log(destination);
+                        
                     return copyFiles(source, destination, '**/*');
                 }));
         });
@@ -535,10 +539,8 @@ function installExternalModules(state) {
             });
         })
         .then(function (modules) {
-            console.log('MODULES');
-        console.log(modules);
             return Promise.all(modules.map(function (module) {
-                var repoRoot = (module.source.directory.root && module.source.directory.root.split('/')) || ['..', '..', '..'],
+                var repoRoot = (module.source.directory.root && module.source.directory.root.split('/')) || ['..', '..'],
                     source = repoRoot.concat([module.globalName]),
                     destination = root.concat(['build', 'client', 'modules', 'bower_components', module.globalName]);
                 console.log('copying from...'); console.log(repoRoot); console.log(source), console.log(destination);
@@ -586,6 +588,9 @@ function setupBuild(state) {
             return fs.moveAsync(from.join('/'), to.join('/'));
         })
         .then(function () {
+            return configureSearch(state);
+        })
+        .then(function () {
             return fs.moveAsync(root.concat(['bower.json']).join('/'), root.concat(['build', 'bower.json']).join('/'));
         })
         .then(function () {
@@ -606,6 +611,21 @@ function setupBuild(state) {
         .then(function () {
             return state;
         });
+}
+
+/**
+ * Returns a Promise that sets the search config 'setup' to use the right target based on this build config.
+ * Any errors are expected to be caught by the caller's catch().
+ */
+function configureSearch(state) {
+    var configFile = state.environment.path.concat(['build', 'client', 'search', 'config.json']).join('/');
+    return fs.readJson(configFile,
+        function(err, config) {
+            var target = state.config.targets.deploy;
+            config.setup = target;
+            return fs.outputJson(configFile, config);
+        }
+    );
 }
 
 function fetchPackagesWithBower(state) {
@@ -700,18 +720,11 @@ function cleanup(state) {
         });
 }
 
-function makeDevBuild(state) {
+function makeBaseBuild(state) {
     var root = state.environment.path,
-        devPath = ['..', 'dev'],
         buildPath = ['..', 'build'];
 
     return fs.removeAsync(buildPath.concat(['build']).join('/'))
-        .then(function () {
-            return fs.ensureDirAsync(devPath.join('/'));
-        })
-        .then(function () {
-            return fs.moveAsync(root.concat(['deploy.cfg']).join('/'), root.concat(['build', 'deploy.cfg']).join('/'));
-        })
         .then(function () {
             return fs.moveAsync(root.concat(['config']).join('/'), root.concat(['build', 'config']).join('/'));
         })
@@ -734,7 +747,7 @@ function makeDistBuild(state) {
 
     return fs.copyAsync(root.concat(['build']).join('/'), root.concat(['dist']).join('/'))
         .then(function () {
-            glob(root.concat(['dist', 'client', 'modules', '**', '*.js']).join('/'))
+            return glob(root.concat(['dist', 'client', 'modules', '**', '*.js']).join('/'))
                 .then(function (matches) {
                     return Promise.all(matches.map(function (match) {
                         var result = uglify.minify(match);
@@ -747,6 +760,9 @@ function makeDistBuild(state) {
         })
         .then(function () {
             return fs.copyAsync(root.concat(['dist']).join('/'), buildPath.concat(['dist']).join('/'));
+        })
+        .then(function () {
+            return state;
         });
 }
 
@@ -768,7 +784,7 @@ function main(type) {
         },
         {
             cwd: ['..'],
-            files: ['deploy.cfg', 'bower.json']
+            files: ['bower.json']
         },
         {
             cwd: ['..'],
@@ -784,13 +800,13 @@ function main(type) {
                     cwd: ['..', 'dev'],
                     path: ['config']
                 });
-                buildControlConfigPath = ['..', 'dev', 'config', type + '.yml'];
+                buildControlConfigPath = ['..', 'dev', 'config', 'builds', type + '.yml'];
             } else {
                 initialFilesystem.push({
                     cwd: ['..'],
                     path: ['config']
                 });
-                buildControlConfigPath = ['..', 'config', type + '.yml'];
+                buildControlConfigPath = ['..', 'config', 'builds', type + '.yml'];
             }
             return {
                 initialFilesystem: initialFilesystem,
@@ -884,13 +900,13 @@ function main(type) {
         })
 
 
-// From here, we can make a dev build, make a release
+        // From here, we can make a dev build, make a release
         .then(function (state) {
             return mutant.copyState(state);
         })
         .then(function (state) {
-            console.log('Making the dev build...');
-            return makeDevBuild(state);
+            console.log('Making the base build...');
+            return makeBaseBuild(state);
         })
 
         .then(function (state) {
@@ -900,17 +916,42 @@ function main(type) {
             if (state.config.build.dist) {
                 console.log('Making the dist build...');
                 return makeDistBuild(state);
-            } else {
-                return null;
             }
+            return state;
+        })
+        
+        // Here we handle any developer links.
+        //.then(function (state) {
+        //    return mutant.copyState(state);
+        //})
+        //.then(function (state) {
+        //    
+        //})
+        
+        .then(function (state) {
+            return mutant.finish(state);
         })
         .catch(function (err) {
             console.log('ERROR');
-            console.log(err);
+            // console.log(err);
+            console.log(util.inspect(err, {
+                showHidden: false,
+                depth: 5
+            }));
             console.log(err.stack);
         });
 }
 
-var type = process.argv[2] || 'build';
+function usage() {
+    console.error('usage: node build <config>');
+}
+
+var type = process.argv[2];
+
+if (type === undefined) {
+    console.error('Build config not specified');
+    usage();
+    process.exit(1);
+}
 
 main(type);
