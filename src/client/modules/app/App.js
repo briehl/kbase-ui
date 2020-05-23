@@ -1,295 +1,229 @@
-/*global define */
-/*jslint
- white: true, browser: true
- */
+/*
+    App, along with main.js, are the heart of the the hub web app.
+    Apps primary responsibilities are:
+    - process plugins
+    - create, start and populate services
+    - create a simple communication bus
+    - provide runtime api for config, services, and comm
+*/
 define([
-    'kb/common/pluginManager',
-    'kb/common/dom',
-    'kb/common/messenger',
-    'kb/widget/widgetMount',
-    'kb/common/props',
-    'kb/common/asyncQueue',
-    'kb/common/appServiceManager'
-], function (
-    pluginManagerFactory,
-    dom,
-    messengerFactory,
-    widgetMountFactory,
+    'lib/pluginManager',
+    'lib/appServiceManager',
+    'lib/kbaseServiceManager',
+    './runtime',
+    'kb_lib/messenger',
+    'kb_lib/props',
+    '../lib/widget/mount',
+    'kb_lib/asyncQueue'
+], (
+    PluginManager,
+    AppServiceManager,
+    kbaseServiceManager,
+    Runtime,
+    Messenger,
     props,
-    asyncQueue,
-    AppServiceManager
-    )
-{
+    WidgetMount,
+    AsyncQueue
+) => {
     'use strict';
 
-    var moduleVersion = '0.0.1';
+    // TODO: make this configurable.
+    const CHECK_CORE_SERVICES = false;
 
-    function factory(config) {
-        var pluginManager,
-            serviceConfig = config.serviceConfig,
-            clientConfig = config.clientConfig,
-            clientConfigProps = props.make({data: clientConfig}),
-            rootNode;
+    /*
+    App
+    The app is the primary runtime for the entire system. It provides a
+    core set of features, including communication, plugins, configuration,
+    fallback error handling, and a simple set of predefined root nodes.
+    The rest of the web app is crafted out of the plugins which are loaded
+    from the configuration.
+    Much of what plugin loading involves is interation with services, which is
+    usually literally providing a configuration object to the service and allowing
+    the service to do its thing.
+    This makes for a very small core, in which nearly all of the functionality is
+    provided by plugins and services.
 
-        // quick hack:
-        Object.keys(serviceConfig).forEach(function (key) {
-            clientConfig[key] = serviceConfig[key];
-        });
+    The config object looks like this:
+    TODO: add a json spec for it.
 
-        function getConfig(prop, defaultValue) {
-            return clientConfigProps.getItem(prop, defaultValue);
+    appConfig -
+    plugins -
+    nodes -
+
+    appConfig
+    at the heart of the configurability of the app is the appConfig. This is a
+    plain JS object containing
+
+    nodes
+    {
+        root: {
+            selector: <string>
         }
-        function hasConfig(prop) {
-            return clientConfigProps.hasItem(prop);
-        }
+    }
 
-        // Events
+    */
 
-        // Our own events
-        var messenger = messengerFactory.make();
-        function receive(channel, message, fun) {
-            return rcv({
-                channel: channel,
-                message: message,
-                handler: fun
+    return class App {
+        constructor(params) {
+            this.plugins = params.plugins;
+            this.services = params.services;
+            this.nodes = params.nodes;
+
+            // We simply wrap the incoming props in our venerable Props thing.
+            this.appConfig = new props.Props({
+                data: params.appConfig
             });
-        }
-        // The "short" versions of the message functions just use the raw
-        // messenger api, which expects an object argument.
-        function rcv(spec) {
-            return messenger.receive(spec);
-        }
-        function urcv(spec) {
-            return messenger.unreceive(spec);
-        }
-        function snd(spec) {
-            return messenger.send(spec);
-        }
 
-        // The friendlier more verbose functions take explicit arguments and
-        // packge them up into the messenger api format.
-        function send(channel, message, data) {
-            return snd({
-                channel: channel,
-                message: message,
-                data: data
-            });
-        }
-        function drop(spec) {
-            urcv(spec);
-        }
-        function sendp(channel, message, data) {
-            return messenger.sendPromise({
-                channel: channel,
-                message: message,
-                data: data
-            });
-        }
-
-        // Plugins
-        function installPlugins(plugins) {
-            return pluginManager.installPlugins(plugins);
-        }
-
-        // Services for plugins
-
-        function setRootNode(selector) {
-            rootNode = dom.qs(selector);
-            if (!rootNode) {
-                throw new Error('Cannot set root node for selector ' + selector);
+            // The entire ui (from the app's perspective) hinges upon a single
+            // root node, which must already be established by the
+            // calling code. If this node is absent, we simply fail here.
+            this.rootNode = document.querySelector(this.nodes.root.selector);
+            if (!this.rootNode) {
+                throw new Error('Cannot set root node for selector ' + this.nodes.root.selector);
             }
 
-        }
-        setRootNode(config.nodes.root.selector);
+            // Events
 
-        var rootMount;
-        function mountRootWidget(widgetId, runtime) {
-            if (!rootNode) {
+            // Our own event system.
+            this.messenger = new Messenger();
+
+            // DOM
+
+            this.rootMount = null;
+
+            // RENDER QUEUE - GET RID OF THIS
+
+            this.renderQueue = new AsyncQueue();
+
+            // SERVICES
+
+            this.appServiceManager = new AppServiceManager({
+                moduleBasePath: 'app/services'
+            });
+
+            this.api = new Runtime({
+                config: this.appConfig,
+                messenger: this.messenger,
+                serviceManager: this.appServiceManager
+            });
+
+            this.pluginManager = new PluginManager({
+                runtime: this.api
+            });
+
+            this.addServices(this.services);
+        }
+
+        mountRootWidget(widgetId, runtime) {
+            if (!this.rootNode) {
                 throw new Error('Cannot set root widget without a root node');
             }
             // remove anything on the root mount, such as a waiter.
-            rootNode.innerHTML = '';
-            if (!rootMount) {
+            this.rootNode.innerHTML = '';
+            if (!this.rootMount) {
                 // create the root mount.
-                rootMount = widgetMountFactory.make({
-                    node: rootNode,
-                    runtime: runtime
+                this.rootMount = new WidgetMount({
+                    node: this.rootNode,
+                    runtime,
+                    widgetManager: runtime.service('widget').widgetManager
                 });
-
             }
             // ask it to load a widget.
-            return rootMount.mountWidget(widgetId);
+            return this.rootMount.mountWidget(widgetId);
         }
 
-        var renderQueue = asyncQueue.make();
-
-        var appServiceManager = AppServiceManager.make();
-
-        function proxyMethod(obj, method, args) {
-            if (!obj[method]) {
-                throw {
-                    name: 'UndefinedMethod',
-                    message: 'The requested method "' + method + '" does not exist on this object',
-                    suggestion: 'This is a developer problem, not your fault'
+        addServices(services) {
+            Object.keys(services).forEach((serviceName) => {
+                // A service which is just declared may not have any configuration
+                // at all.
+                const serviceConfig = JSON.parse(JSON.stringify(services[serviceName]));
+                const service = {
+                    name: serviceName
                 };
-            }
-            return obj[method].apply(obj, args);
+                service.module = serviceName;
+
+                // serviceConfig.runtime = api;
+                this.appServiceManager.addService(service, serviceConfig);
+            });
         }
 
-        function navigate(path) {
-            send('app', 'navigate', path);
+        checkCoreServices() {
+            const manager = new kbaseServiceManager.KBaseServiceManager({
+                runtime: this.api
+            });
+            return manager.check();
         }
 
-        var api = {
-            getConfig: getConfig,
-            config: getConfig,
-            hasConfig: hasConfig,
-            // Session
-            installPlugins: installPlugins,
-            send: send,
-            sendp: sendp,
-            recv: receive,
-            drop: drop,
-            snd: snd,
-            rcv: rcv,
-            urcv: urcv,
-            // navigation
-            navigate: navigate,
-            // Services
-            addService: function () {
-                return proxyMethod(appServiceManager, 'addService', arguments);
-            },
-            loadService: function () {
-                return proxyMethod(appServiceManager, 'loadService', arguments);
-            },
-            getService: function () {
-                return proxyMethod(appServiceManager, 'getService', arguments);
-            },
-            service: function () {
-                return proxyMethod(appServiceManager, 'getService', arguments);
-            },
-            hasService: function () {
-                return proxyMethod(appServiceManager, 'hasService', arguments);
-            },
-            dumpServices: function () {
-                return proxyMethod(appServiceManager, 'dumpServices', arguments);
-            }
-        };
-
-
-        function begin() {
-            // Register service handlers.
-            appServiceManager.addService('session', {
-                runtime: api,
-                cookieName: 'kbase_session',
-                extraCookieNames: ['kbase_narr_session'],
-                loginUrl: serviceConfig.services.login.url,
-                cookieMaxAge: clientConfig.ui.constants.session_max_age
-
-            });
-            appServiceManager.addService('heartbeat', {
-                runtime: api,
-                interval: 500
-            });
-            appServiceManager.addService('route', {
-                runtime: api,
-                // notFoundRoute: {redirect: {path: 'message/notfound'}},
-                defaultRoute: {redirect: {path: 'dashboard'}}
-            });
-            appServiceManager.addService('menu', {
-                runtime: api,
-                menus: config.menus
-            });
-            appServiceManager.addService('widget', {
-                runtime: api
-            });
-            appServiceManager.addService('service', {
-                runtime: api
-            });
-            appServiceManager.addService('data', {
-                runtime: api
-            });
-            appServiceManager.addService('type', {
-                runtime: api
-            });
-            appServiceManager.addService('userprofile', {
-                runtime: api
-            });
-            appServiceManager.addService('analytics', {
-                runtime: api
-            });
-
-            pluginManager = pluginManagerFactory.make({
-                runtime: api
-            });
-
+        start() {
             // Behavior
-            // There are not too many global behaviors, and perhaps there should 
-            // even fewer or none. Most behavior is within services or 
+            // There are not too many global behaviors, and perhaps there should
+            // even fewer or none. Most behavior is within services or
             // active widgets themselves.
-            receive('session', 'loggedout', function () {
-                send('app', 'navigate', 'goodbye');
-            });
 
-            receive('app', 'route-not-found', function (info) {
-                // alert('help, the route was not found!: ' + route.path);
-                send('app', 'navigate', {
-                    path: 'message/error/notfound',
-                    params: {
-                        info: JSON.stringify(info)
-                    },
-                    replace: true
-                });
+            // TODO: replace this with call to mount a page not found panel
+            // rather than routing... This will preserve the url and ease the life
+            // of developers around the world.
+            this.messenger.receive({
+                channel: 'app',
+                message: 'route-not-found',
+                handler: (info) => {
+                    this.messenger.send({
+                        channel: 'app',
+                        message: 'navigate',
+                        data: {
+                            path: 'message/error/notfound',
+                            params: {
+                                info: JSON.stringify(info)
+                            },
+                            replace: true
+                        }
+                    });
+                }
             });
 
             // UI should be a service...
             // NB this was never developed beyond this stage, and should
             // probably be hunted down and removed.
-            receive('ui', 'render', function (arg) {
-                renderQueue.addItem({
-                    onRun: function () {
-                        if (arg.node) {
-                            arg.node.innerHTML = arg.content;
-                        } else {
-                            console.error('ERROR');
-                            console.error('Invalid node for ui/render');
+            this.messenger.receive({
+                channel: 'ui',
+                message: 'render',
+                handler: (arg) => {
+                    this.renderQueue.addItem({
+                        onRun: () => {
+                            if (arg.node) {
+                                arg.node.innerHTML = arg.content;
+                            } else {
+                                console.error('ERROR');
+                                console.error('Invalid node for ui/render');
+                            }
                         }
-                    }
-                });
+                    });
+                }
             });
 
-            // ROUTING
-
-            return appServiceManager.loadServices()
-                .then(function () {
-                    return installPlugins(config.plugins);
+            return this.appServiceManager
+                .loadServices({
+                    runtime: this.api
                 })
-                .then(function () {
-                    return appServiceManager.startServices();
+                .then(() => {
+                    return this.pluginManager.installPlugins(this.plugins);
                 })
-                .then(function () {
-                    return mountRootWidget('root', api);
+                .then(() => {
+                    if (CHECK_CORE_SERVICES) {
+                        return this.checkCoreServices();
+                    }
                 })
-                .then(function () {
-                    // kick off handling of the current route.
-                    api.service('analytics').pageView('/index');
-                    // remove the loading status.
-                    
-                    send('app', 'do-route');
-                    return api;
+                .then(() => {
+                    return this.appServiceManager.startServices();
+                })
+                .then(() => {
+                    return this.mountRootWidget('root', this.api);
+                })
+                .then(() => {
+                    return this.api;
                 });
         }
-        return {
-            begin: begin
-        };
-    }
-    return {
-        run: function (config) {
-            var runtime = factory(config);
-            return runtime.begin();
-        },
-        version: function () {
-            return moduleVersion;
-        }
+
+        stop() {}
     };
 });

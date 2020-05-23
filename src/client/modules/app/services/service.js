@@ -1,62 +1,39 @@
-/*global define */
-/*jslint white: true */
 define([
-    'promise',
-    'require'
-], function (Promise, require) {
+    'bluebird'
+], function (
+    Promise
+) {
     'use strict';
 
+    return class Service {
+        constructor({runtime}) {
+            this.runtime = runtime;
+        }
 
-    function factory(config) {
-        var runtime = config.runtime;
-
-        function pluginHandler(serviceConfigs) {
-            return Promise.try(function () {
-                var services = serviceConfigs.map(function (serviceConfig) {
+        pluginHandler(serviceConfigs) {
+            return Promise.try(() => {
+                const services = serviceConfigs.map((serviceConfig) => {
                     try {
-                        runtime.addService(serviceConfig.name, {
-                            runtime: runtime,
+                        this.runtime.addService(serviceConfig.name, {
+                            runtime: this.runtime,
                             module: serviceConfig.module
                         });
                     } catch (ex) {
-                        console.log('** ERROR ** ');
-                        console.log(ex);
+                        console.error('** ERROR ** ');
+                        console.error(ex);
                     }
-                    return runtime.loadService(serviceConfig.name);
-
-//                    return new Promise(function (resolve) {
-//                        require([serviceConfig.module], function (serviceFactory) {
-//                            runtime.addService([serviceConfig.name], serviceFactory.make({
-//                                runtime: runtime
-//                            }));
-//                            resolve();
-//                        });
-//                    });
+                    return this.runtime.loadService(serviceConfig.name);
                 });
                 return Promise.all(services);
             });
         }
 
-        function start() {
-            return true;
-        }
-        function stop() {
+        start() {
             return true;
         }
 
-
-        return {
-            pluginHandler: pluginHandler,
-            start: start,
-            stop: stop
-        };
-    }
-
-
-
-    return {
-        make: function (config) {
-            return factory(config);
+        stop() {
+            return true;
         }
     };
 });

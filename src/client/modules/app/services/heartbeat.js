@@ -1,37 +1,28 @@
-/*global define */
-/*jslint white: true, browser: true */
-define([
-], function () {
+define([], function () {
     'use strict';
-    function factory(config) {
-        // Heartbeat
-        var heartbeat = 0,
-            heartbeatTimer,
-            runtime = config.runtime,
-            interval = config.interval || 100;
 
-        function start() {
-            heartbeat = 0;
-            heartbeatTimer = window.setInterval(function () {
-                heartbeat += 1;
-                runtime.send('app', 'heartbeat', {heartbeat: heartbeat});
-            }, interval);
+    class HeartbeatService {
+        constructor({ config, params }) {
+            this.runtime = params.runtime;
+            this.interval = config.interval;
+            this.heartbeat = 0;
+            this.heartbeatTimer = null;
         }
-        function stop() {
-            if (heartbeatTimer) {
-                window.clearInterval(heartbeatTimer);
+
+        start() {
+            this.heartbeat = 0;
+            this.heartbeatTimer = window.setInterval(() => {
+                this.heartbeat += 1;
+                this.runtime.send('app', 'heartbeat', { heartbeat: this.heartbeat });
+            }, this.interval);
+        }
+
+        stop() {
+            if (this.heartbeatTimer) {
+                window.clearInterval(this.heartbeatTimer);
             }
         }
-        return {
-            start: start,
-            stop: stop
-        };
     }
 
-    return {
-        make: function (config) {
-            return factory(config);
-        }
-    };
+    return { ServiceClass: HeartbeatService };
 });
- 

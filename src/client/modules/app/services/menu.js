@@ -1,205 +1,177 @@
-/*global define */
-/*jslint white: true */
-define([
-    'bluebird',
-    'kb/common/observed'
-], function (Promise, observed) {
+define(['bluebird', 'kb_lib/observed'], (Promise, Observed) => {
     'use strict';
-    function factory(config) {
-        var state = observed.make(),
-            runtime = config.runtime;
 
-        function setMenus(from) {
-            from = from || {};
-            var menu = {
-                authenticated: {
-                    main: [
-                    ],
-                    developer: [
-                    ],
-                    help: [
-                    ]
-                },
-                unauthenticated: {
-                    main: [
-                    ],
-                    developer: [
-                    ],
-                    help: [
-                    ]
+    return class Menu {
+        constructor({config}) {
+            this.config = config;
+            this.state = new Observed();
+
+            this.state.setItem('menuItems', {
+                divider: {
+                    type: 'divider'
                 }
-            }
-
-            // Sets each menu menu item as the actual menu definition.
-            Object.keys(from).forEach(function (menuSet) {
-                Object.keys(from[menuSet]).forEach(function (menuSection) {
-                    menu[menuSet][menuSection] = from[menuSet][menuSection];
-                });
             });
 
-            state.setItem('menus', menu);
-        }
-        function setupMenus() {
-            var menu = {
-                authenticated: {
-                    main: [
-                    ],
-                    developer: [
-                    ],
-                    help: [
-                    ]
-                },
-                unauthenticated: {
-                    main: [
-                    ],
-                    developer: [
-                    ],
-                    help: [
-                    ]
-                }
-            }
-            state.setItem('menus', menu);
+            // MAIN
+            this.state.setItem('menu', []);
+
+            // creates initial empty menus
+            this.setupMenus();
         }
 
+        setupMenus() {
+            const hamburgerMenu = {
+                main: [],
+                developer: [],
+                help: []
+            };
+            this.state.setItem('menu.hamburger', hamburgerMenu);
 
-        state.setItem('menuItems', {
-            divider: {
-                type: 'divider'
-            }
-        });
-
-
-        function clearMenu() {
-            state.setItem('menu', []);
+            const sidebarMenu = {
+                main: []
+            };
+            this.state.setItem('menu.sidebar', sidebarMenu);
         }
-        function addMenuItem(id, menuDef) {
-            state.modifyItem('menuItems', function (menuItems) {
+
+        // Adds a menu item definition
+        addMenuItem(id, menuDef) {
+            // Another quick hack - not all menu defs have the name - the name
+            // aka id  is also the may key for plugin config menu items.
+            menuDef.id = id;
+            this.state.modifyItem('menuItems', (menuItems) => {
                 menuItems[id] = menuDef;
                 return menuItems;
             });
         }
 
         /*
-         * TODO: support menu sections. For now, just a simple menu.
+         * Add a defined menu item to a menu, according to a menu entry definition.
          */
-        function addToMenu(menuEntry, item) {
-            var id, section, position,
-                menuItems = state.getItem('menuItems'),
-                menuItem = menuItems[item];
+        addToMenu(menuEntry, menuItemSpec) {
+            const menuItems = this.state.getItem('menuItems');
+            const menuItemDef = menuItems[menuItemSpec.id];
 
-            if (!menuItem) {
+            if (!menuItemDef) {
                 throw {
                     type: 'InvalidKey',
                     reason: 'MenuItemNotFound',
-                    message: 'The menu item key provided, ' + item + ', is not registered'
+                    message: 'The menu item key provided, "' + menuItemSpec.id + '", is not registered'
                 };
             }
-            if (typeof menuEntry === 'object') {
-                id = menuEntry.name;
-                section = menuEntry.section;
-                position = menuEntry.position || 'bottom';
-            } else {
-                id = menuEntry;
-                section = 'main';
-                position = 'bottom';
-            }
-            state.modifyItem('menus', function (menus) {
-                if (position === 'top') {
-                    menus[id][section].unshift(menuItems[item]);
+
+            let path;
+            if (menuItemDef.path) {
+                if (typeof menuItemDef.path === 'string') {
+                    path = menuItemDef.path;
+                } else if (menuItemDef.path instanceof Array) {
+                    path = menuItemDef.path.join('/');
                 } else {
-                    menus[id][section].push(menuItems[item]);
+                    throw new Error('Invalid path for menu item', menuItemDef);
+                }
+            }
+            const menuItem = {
+                // These are from the plugin's menu item definition
+                id: menuItemDef.id,
+                label: menuItemSpec.label || menuItemDef.label,
+                path: path,
+                icon: menuItemDef.icon,
+                uri: menuItemDef.uri,
+                newWindow: menuItemDef.newWindow,
+                beta: menuItemDef.beta || false,
+                // These are from the ui menu item spec
+                allow: menuItemSpec.allow || null,
+                allowRoles: menuItemSpec.allowRoles || null,
+                authRequired: menuItemSpec.auth ? true : false
+            };
+
+            const menu = menuEntry.menu;
+            const section = menuEntry.section;
+            const position = menuEntry.position || 'bottom';
+
+            this.state.modifyItem('menu.' + menu, (menus) => {
+                if (!menus[section]) {
+                    console.error('ERROR: Menu section not defined', menuEntry, menu, section, menus);
+                    throw new Error('Menu section not defined: ' + section);
+                }
+                if (position === 'top') {
+                    menus[section].unshift(menuItem);
+                } else {
+                    menus[section].push(menuItem);
                 }
                 return menus;
             });
         }
 
-        function getCurrentMenu() {
-            var menu,
-                menus = state.getItem('menus');
-            if (runtime.getService('session').isLoggedIn()) {
-                menu = menus['authenticated'];
-            } else {
-                menu = menus['unauthenticated'];
-            }
-            return menu;
+        getCurrentMenu(menu) {
+            menu = menu || 'hamburger';
+            return this.state.getItem('menu.' + menu);
         }
 
-
         // Plugin interface
-        function pluginHandler(newMenus) {
+        pluginHandler(newMenus) {
             if (!newMenus) {
                 return;
             }
-            return Promise.try(function () {
-                newMenus.forEach(function (menu) {
-                    addMenuItem(menu.name, menu.definition);
-//                    if (menu.menus) {
-//                        menu.menus.forEach(function (menuEntry) {
-//                            
-//                            addToMenu(menuEntry, menu.name);
-//                        });
-//                    }
+            return Promise.try(() => {
+                newMenus.forEach((menu) => {
+                    // quick patch to the definition to add the id.
+                    // TODO: maybe just store the whole menu from
+                    // the plugin config?
+                    menu.id = menu.name;
+                    this.addMenuItem(menu.name, menu.definition || menu);
                 });
             });
         }
 
-        function onChange(fun) {
-            state.listen('menu', {
-                onSet: function (value) {
-                    fun(getCurrentMenu());
+        onChange(fun) {
+            this.state.listen('menu.hamburger', {
+                onSet: () => {
+                    fun(this.getCurrentMenu('hamburger'));
                 }
             });
         }
 
         // SERVICE API
 
-        function start() {
-            runtime.recv('session', 'loggedin', function () {
-                state.setItem('menu', state.getItem('menus').authenticated);
-            });
-            runtime.recv('session', 'loggedout', function () {
-                state.setItem('menu', state.getItem('menus').unauthenticated);
-            });
-            Object.keys(config.menus).forEach(function (menuSet) {
-                Object.keys(config.menus[menuSet]).forEach(function (menuSection) {
-                    config.menus[menuSet][menuSection].forEach(function (menuItem) {
-                        addToMenu({
-                            name: menuSet,
-                            section: menuSection,
-                            position: 'bottom'
-                        }, menuItem);
+        start() {
+            // The hamburger menu.
+            Object.keys(this.config.menus).forEach((menu) => {
+                const menuDef = this.config.menus[menu];
+                // Skip a menu with no sections
+                if (!menuDef.sections) {
+                    return;
+                }
+                Object.keys(menuDef.sections).forEach((section) => {
+                    // Skip sections with no items.
+                    if (!menuDef.sections[section]) {
+                        return;
+                    }
+                    if (!menuDef.sections[section].items) {
+                        return;
+                    }
+                    const items = menuDef.sections[section].items;
+                    const disabled = menuDef.disabled || [];
+                    items.forEach((menuItem) => {
+                        if (menuItem.disabled) {
+                            return;
+                        }
+                        if (disabled.indexOf(menuItem.id) >= 0) {
+                            return;
+                        }
+                        this.addToMenu(
+                            {
+                                menu: menu,
+                                section: section,
+                                position: 'bottom',
+                                allow: menuItem.allow
+                            },
+                            menuItem
+                        );
                     });
                 });
             });
         }
 
-        function stop() {
-
-        }
-
-        // MAIN
-
-        state.setItem('menu', []);
-        setupMenus();
-
-
-
-        // API
-        return {
-            getCurrentMenu: getCurrentMenu,
-            pluginHandler: pluginHandler,
-            onChange: onChange,
-            setMenus: setMenus,
-            addMenuItem: addMenuItem,
-            addToMenu: addToMenu,
-            start: start,
-            stop: stop
-        };
-    }
-
-    return {
-        make: function (config) {
-            return factory(config);
-        }
+        stop() {}
     };
 });

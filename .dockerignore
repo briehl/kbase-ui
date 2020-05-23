@@ -1,0 +1,36 @@
+# package caches wherever they may be installed
+bower_components
+node_modules
+
+# Any trash directories
+_trash
+
+# IDEs
+# put your ide here
+nbproject
+
+# Editor and OS artifacts
+.DS_Store
+.vscode
+.idea
+
+# Build artifacts
+/build/dist
+/build/build
+/build/build-test-coverage
+/build/test
+/build/deploy
+/mutations/mutantfiles
+
+# Doc artifacts
+_book
+
+# Developer artifacts
+/dev/docker-compose.override.yml
+node_modules
+
+# General purpose temp directory
+/temp/*
+!/temp/README.md
+
+docker-compose.override.yml

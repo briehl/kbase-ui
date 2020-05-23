@@ -1,0 +1,10 @@
+(function (global) {
+    global.__kbase__build__ = {
+        // git rev-parse HEAD
+        // dev, ci, or prod
+        target: '{{ target }}',
+        gitCommitHash: '{{ git.commitHash }}',
+        gitCommitAbbreviatedHash: '{{ git.commitAbbreviatedHash }}',
+        builtAt: {{ stats.start }}
+    };
+}(window));
